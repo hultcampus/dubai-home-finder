@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dubai Home Finder - Hult International Business School</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Plus Jakarta Sans', 'Segoe UI', sans-serif; background: #F5F0E8; color: #1B2A4A; -webkit-font-smoothing: antialiased; }
+  #root { min-height: 100vh; }
+  .loader { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; background:#1B2A4A; color:white; }
+  .loader h2 { font-size:20px; margin-bottom:8px; } .loader p { opacity:0.5; font-size:14px; }
+  .spin { width:32px; height:32px; border:3px solid rgba(255,255,255,0.2); border-top-color:white; border-radius:50%; animation:spin 0.8s linear infinite; margin-bottom:20px; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+</head>
+<body>
+<div id="root"><div class="loader"><div class="spin"></div><h2>Dubai Home Finder</h2><p>Loading accommodation data...</p></div></div>
+
+<script>
+// JSONP loader - bypasses CORS for local files and Safari
+var SHEET_ID = "10pW1sKQA-_gPfRQX9xHPvqtmm5kCoRDTyGBoRaPz-Rw";
+var _sheetData = { props: null, rooms: null };
+
+function gvizToRows(response) {
+  var cols = response.table.cols.map(function(c) { return c.label; });
+  return response.table.rows.map(function(row) {
+    var obj = {};
+    row.c.forEach(function(cell, i) {
+      obj[cols[i]] = cell ? (cell.v !== null && cell.v !== undefined ? String(cell.v) : "") : "";
+    });
+    return obj;
+  });
+}
+
+function handleProps(response) {
+  _sheetData.props = gvizToRows(response);
+  checkReady();
+}
+
+function handleRooms(response) {
+  _sheetData.rooms = gvizToRows(response);
+  checkReady();
+}
+
+function checkReady() {
+  if (_sheetData.props && _sheetData.rooms) {
+    window._rawSheetData = _sheetData;
+    var evt = new Event('sheetDataReady');
+    window.dispatchEvent(evt);
+  }
+}
+
+function loadSheet(gid, callback) {
+  var s = document.createElement('script');
+  s.src = "https://docs.google.com/spreadsheets/d/" + SHEET_ID + "/gviz/tq?tqx=responseHandler:" + callback + "&gid=" + gid;
+  s.onerror = function() {
+    window._sheetLoadError = true;
+    var evt = new Event('sheetDataReady');
+    window.dispatchEvent(evt);
+  };
+  document.head.appendChild(s);
+}
+
+loadSheet(0, "handleProps");
+loadSheet(39750963, "handleRooms");
+
+// Timeout fallback
+setTimeout(function() {
+  if (!_sheetData.props || !_sheetData.rooms) {
+    window._sheetLoadError = true;
+    var evt = new Event('sheetDataReady');
+    window.dispatchEvent(evt);
+  }
+}, 10000);
+</script>
+
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+const C = {
+  navy: "#1B2A4A", blue: "#2563EB", cream: "#F5F0E8", white: "#FFFFFF",
+  gray: "#64748B", lightGray: "#E2E8F0", green: "#166534", greenBg: "#F0FDF4",
+  teal: "#0E7490", amber: "#92400E", amberBg: "#FFFBEB", amberBorder: "#F59E0B",
+  tagBg: "#EEF2FF",
+};
+
+const typeLabels = { student_residence: "Student Residence", hotel: "Hotel / Hotel Apartment" };
+const typeColors = { student_residence: "#6B2D8B", hotel: "#1B2A4A" };
+
+function parseNum(v) { const n = parseFloat(v); return isNaN(n) ? 0 : n; }
+function parseBool(v) { return String(v).toUpperCase() === "TRUE"; }
+function parseStr(v) { return (v || "").trim(); }
+
+function buildData(propsRows, roomsRows) {
+  const roomsByProp = {};
+  roomsRows.forEach(r => {
+    const pid = parseStr(r.propertyId);
+    if (!pid) return;
+    if (!roomsByProp[pid]) roomsByProp[pid] = [];
+    const room = {
+      type: parseStr(r.roomType),
+      privacy: parseStr(r.privacy) || "private",
+      min: parseNum(r.minRate),
+      max: parseNum(r.maxRate),
+      perNight: parseBool(r.perNight),
+      fromPrice: parseBool(r.fromPrice),
+      forDuration: parseStr(r.forDuration) || undefined,
+      rateTag: parseStr(r.rateTag) || undefined,
+    };
+    const monthly = parseNum(r.monthly);
+    const total = parseNum(r.total);
+    if (monthly) room.monthly = monthly;
+    if (total) room.total = total;
+    roomsByProp[pid].push(room);
+  });
+
+  return propsRows.map(p => {
+    const id = parseStr(p.id);
+    const propRooms = roomsByProp[id] || [];
+    const estimates = propRooms.map(r => r.monthly || (r.perNight ? r.min * 30 : r.min)).filter(v => v > 0);
+    const minM = estimates.length ? Math.min(...estimates) : 0;
+    const maxM = estimates.length ? Math.max(...estimates) : 0;
+    const imgs = [parseStr(p.image1_url), parseStr(p.image2_url)].filter(Boolean);
+
+    return {
+      id: parseInt(id) || 0,
+      name: parseStr(p.name),
+      type: parseStr(p.type) || "hotel",
+      location: parseStr(p.location),
+      distance: parseStr(p.distance),
+      distanceMins: parseNum(p.distanceMins),
+      proximity: parseNum(p.proximity) || 2,
+      contact: {
+        email: parseStr(p.email),
+        phone: parseStr(p.phone),
+        person: parseStr(p.contactPerson),
+        website: parseStr(p.website),
+      },
+      amenities: parseStr(p.amenities).split("|").map(a => a.trim()).filter(Boolean),
+      deposit: parseStr(p.deposit),
+      rateNote: parseStr(p.rateNote),
+      stayType: parseStr(p.stayType) || "both",
+      minStay: parseNum(p.minStay),
+      maxStay: parseNum(p.maxStay) || 12,
+      notes: parseStr(p.notes),
+      imgs: imgs.length ? imgs : null,
+      rooms: propRooms,
+      minMonthly: minM, maxMonthly: maxM,
+      rateType: propRooms.some(r => r.monthly || r.total) ? (propRooms.some(r => r.total) ? "total" : "monthly") : (propRooms.some(r => r.perNight) ? "nightly" : "monthly"),
+    };
+  }).filter(p => p.name && p.rooms.length > 0);
+}
+
+function monthlyEstimate(room) {
+  if (room.monthly) return room.monthly;
+  if (room.perNight) return room.min * 30;
+  return room.min;
+}
+
+const budgetTiers = ["under_3000", "3000_5000", "5000_8000", "8000_15000", "15000_plus"];
+const budgetRanges = { "under_3000": [0,3000], "3000_5000": [3000,5000], "5000_8000": [5000,8000], "8000_15000": [8000,15000], "15000_plus": [15000,999999] };
+function isLongDuration(d) { return d === "long_3_6" || d === "long_6_12"; }
+
+function filterAccommodations(accommodations, answers) {
+  const { type, duration, budget, proximity, privacy } = answers;
+  const [budgetMin, budgetMax] = budgetRanges[budget] || [0, 999999];
+  let filtered = accommodations.map(acc => {
+    let rooms = acc.rooms;
+    if (duration) {
+      const wantLong = isLongDuration(duration);
+      const dr = rooms.filter(r => !r.forDuration || (wantLong ? r.forDuration === "long" : r.forDuration === "short"));
+      if (dr.length > 0) rooms = dr;
+    }
+    return { ...acc, rooms };
+  });
+  filtered = filtered.filter(acc => {
+    if (type && type !== "any" && acc.type !== type) return false;
+    if (!acc.rooms.some(r => { const e = monthlyEstimate(r); return e >= budgetMin && e <= budgetMax; })) return false;
+    if (duration === "short" && acc.stayType === "long") return false;
+    if (isLongDuration(duration) && acc.stayType === "short" && acc.maxStay < 3) return false;
+    const durationMaxMonths = { short:1, medium:3, long_3_6:6, long_6_12:12 };
+    if (duration && acc.minStay > (durationMaxMonths[duration] || 12)) return false;
+    if (proximity === "walking" && acc.proximity !== 1) return false;
+    if (proximity === "commute" && acc.proximity !== 2) return false;
+    return true;
+  });
+  if (privacy === "private") { filtered = filtered.map(a => ({...a, rooms: a.rooms.filter(r => r.privacy === "private")})).filter(a => a.rooms.length > 0); }
+  filtered = filtered.map(a => ({...a, rooms: a.rooms.filter(r => { const e = monthlyEstimate(r); return e >= budgetMin && e <= budgetMax; })})).filter(a => a.rooms.length > 0);
+  filtered.sort((a,b) => a.minMonthly - b.minMonthly);
+  return filtered;
+}
+
+function filterWithRelaxation(accommodations, answers) {
+  let results = filterAccommodations(accommodations, answers);
+  if (results.length > 0) return { results, relaxedMessage: null };
+  const suggestions = [];
+  if (answers.proximity && answers.proximity !== "any") {
+    if (answers.proximity === "walking") {
+      let r = filterAccommodations(accommodations, {...answers, proximity:"commute"});
+      if (r.length > 0) return { results: r, relaxedMessage: "No walking-distance options matched, showing short commute instead." };
+      r = filterAccommodations(accommodations, {...answers, proximity:"any"});
+      if (r.length > 0) return { results: r, relaxedMessage: "No nearby options matched, showing all distances instead." };
+    } else {
+      const r = filterAccommodations(accommodations, {...answers, proximity:"any"});
+      if (r.length > 0) return { results: r, relaxedMessage: "No short-commute options matched, showing all distances instead." };
+    }
+    suggestions.push("try 'Any distance'");
+  }
+  if (answers.budget) {
+    const ci = budgetTiers.indexOf(answers.budget);
+    if (ci < budgetTiers.length-1) { const r = filterAccommodations(accommodations, {...answers, budget:budgetTiers[ci+1]}); if (r.length > 0) { const rng = budgetRanges[budgetTiers[ci+1]]; const l = budgetTiers[ci+1]==="15000_plus"?"AED 15,000+":"AED "+rng[0].toLocaleString()+" - "+rng[1].toLocaleString(); return { results:r, relaxedMessage:"No options in your budget. Showing the next tier up ("+l+"/month)." }; } }
+    if (ci > 0) { const r = filterAccommodations(accommodations, {...answers, budget:budgetTiers[ci-1]}); if (r.length > 0) { const rng = budgetRanges[budgetTiers[ci-1]]; const l = budgetTiers[ci-1]==="under_3000"?"under AED 3,000":"AED "+rng[0].toLocaleString()+" - "+rng[1].toLocaleString(); return { results:r, relaxedMessage:"No options in your budget. Showing the next tier down ("+l+"/month)." }; } }
+    suggestions.push("adjust your budget");
+  }
+  if (answers.duration) { const r = filterAccommodations(accommodations, {...answers, duration:undefined}); if (r.length > 0) return { results:r, relaxedMessage:"No options matched your stay length. Showing all durations instead." }; suggestions.push("try a different stay length"); }
+  if (answers.privacy && answers.privacy !== "any") { const r = filterAccommodations(accommodations, {...answers, privacy:"any"}); if (r.length > 0) return { results:r, relaxedMessage:"No options matched your room preference. Showing all room types." }; suggestions.push("consider shared rooms"); }
+  const msg = suggestions.length > 0 ? "No options match this exact combination. You could " + suggestions.join(", or ") + "." : "No options match this combination. Try starting over with different preferences.";
+  return { results:[], relaxedMessage: msg };
+}
+
+function DualImage({ imgs, alt }) {
+  const [failed, setFailed] = useState({});
+  const fallback = (<div style={{ width:"100%", height:"180px", background:C.navy, display:"flex", alignItems:"center", justifyContent:"center", color:"white", fontSize:"15px", fontWeight:600, textAlign:"center", padding:"20px" }}>{alt}</div>);
+  if (!imgs || imgs.length === 0) return fallback;
+  return (
+    <div style={{ display:"flex", width:"100%", height:"180px", overflow:"hidden" }}>
+      {imgs.map((src, i) => src && !failed[i] ? (
+        <img key={i} src={src} alt={alt} style={{ flex:1, objectFit:"cover", minWidth:0 }} onError={() => setFailed(p => ({...p,[i]:true}))} />
+      ) : (
+        <div key={i} style={{ flex:1, background:C.navy, display:"flex", alignItems:"center", justifyContent:"center", color:"white", fontSize:"13px", fontWeight:600 }}>{alt}</div>
+      ))}
+    </div>
+  );
+}
+
+function App() {
+  const [accommodations, setAccommodations] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [step, setStep] = useState(0);
+  const [answers, setAnswers] = useState({});
+  const [results, setResults] = useState([]);
+  const [relaxedMessage, setRelaxedMessage] = useState(null);
+  const [expandedContact, setExpandedContact] = useState(null);
+  const [expandedAmenities, setExpandedAmenities] = useState(null);
+  const [sortBy, setSortBy] = useState("price");
+
+  useEffect(() => {
+    function onData() {
+      if (window._sheetLoadError) {
+        setError("Could not load accommodation data. Please try refreshing the page.");
+        setLoading(false);
+        return;
+      }
+      if (window._rawSheetData) {
+        try {
+          const data = buildData(window._rawSheetData.props, window._rawSheetData.rooms);
+          if (data.length === 0) throw new Error("empty");
+          setAccommodations(data);
+        } catch(e) {
+          setError("Could not load accommodation data. Please try refreshing the page.");
+        }
+        setLoading(false);
+      }
+    }
+    if (window._rawSheetData) { onData(); }
+    else { window.addEventListener('sheetDataReady', onData); }
+    return () => window.removeEventListener('sheetDataReady', onData);
+  }, []);
+
+  const runFilter = (a) => { const { results:r, relaxedMessage:msg } = filterWithRelaxation(accommodations, a); setResults(r); setRelaxedMessage(msg); setStep(6); };
+  const selectAnswer = (key, value) => {
+    const na = {...answers, [key]:value}; setAnswers(na);
+    if (key === "type" && value === "any") { setResults(accommodations); setRelaxedMessage(null); setStep(6); return; }
+    const ns = step + 1;
+    if (ns === 5 && na.type !== "student_residence") { runFilter({...na, privacy:"any"}); return; }
+    if (ns === 6) runFilter(na); else setStep(ns);
+  };
+  const goBack = () => {
+    if (step===2){const na={...answers};delete na.type;setAnswers(na);setStep(1);}
+    else if(step===3){const na={...answers};delete na.duration;setAnswers(na);setStep(2);}
+    else if(step===4){const na={...answers};delete na.budget;setAnswers(na);setStep(3);}
+    else if(step===5){const na={...answers};delete na.proximity;setAnswers(na);setStep(4);}
+  };
+  const reset = () => { setStep(0); setAnswers({}); setResults([]); setRelaxedMessage(null); setExpandedContact(null); setExpandedAmenities(null); setSortBy("price"); };
+
+  const s = {
+    container: { fontFamily:"'Plus Jakarta Sans','Segoe UI',sans-serif", background:C.cream, minHeight:"100vh", color:C.navy },
+    header: { background:C.navy, padding:"18px 24px", color:"white", display:"flex", alignItems:"center", justifyContent:"space-between" },
+    content: { maxWidth:"680px", margin:"0 auto", padding:"24px 16px" },
+    q: { fontSize:"22px", fontWeight:700, marginBottom:"8px", color:C.navy, lineHeight:1.3 },
+    sub: { fontSize:"14px", color:C.gray, marginBottom:"24px", lineHeight:1.5 },
+  };
+  const optStyle = { background:"white", color:C.navy, border:"2px solid "+C.lightGray, borderRadius:"10px", padding:"16px 20px", marginBottom:"10px", cursor:"pointer", display:"flex", flexDirection:"column", gap:"3px", transition:"border-color 0.15s ease" };
+  const renderOption = (opt, onClick) => (
+    <div key={opt.value} style={optStyle} onClick={() => onClick(opt.value)} onMouseOver={e => e.currentTarget.style.borderColor=C.navy} onMouseOut={e => e.currentTarget.style.borderColor=C.lightGray}>
+      <span style={{ fontSize:"15px", fontWeight:600 }}>{opt.label}</span><span style={{ fontSize:"13px", color:C.gray }}>{opt.desc}</span>
+    </div>
+  );
+
+  if (loading) return null;
+  if (error) return (<div style={{...s.container, display:"flex", alignItems:"center", justifyContent:"center", textAlign:"center", padding:"40px"}}><div><h2 style={{marginBottom:"12px", fontSize:"18px"}}>{error}</h2><button onClick={() => window.location.reload()} style={{background:C.navy,color:"white",border:"none",borderRadius:"8px",padding:"12px 32px",fontSize:"14px",fontWeight:700,cursor:"pointer"}}>Retry</button></div></div>);
+
+  if (step === 0) return (
+    <div style={{ background:C.navy, minHeight:"100vh", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"40px 24px", textAlign:"center", color:"white" }}>
+      <div style={{ fontSize:"12px", letterSpacing:"3px", textTransform:"uppercase", marginBottom:"20px", opacity:0.6, fontWeight:500 }}>Hult International Business School</div>
+      <h1 style={{ fontSize:"34px", fontWeight:800, marginBottom:"14px", lineHeight:1.2 }}>Dubai Home Finder</h1>
+      <p style={{ fontSize:"15px", maxWidth:"420px", opacity:0.7, lineHeight:1.7, marginBottom:"40px" }}>Answer a few questions and we'll match you with accommodation options from Hult's partner network that fit your needs and budget.</p>
+      <button onClick={() => setStep(1)} style={{ background:"white", color:C.navy, border:"none", borderRadius:"8px", padding:"16px 48px", fontSize:"15px", fontWeight:700, cursor:"pointer" }}>Find Your Home</button>
+      <div style={{ marginTop:"48px", fontSize:"11px", opacity:0.35 }}>Hult Dubai Accommodation AY 2025-2026</div>
+    </div>
+  );
+
+  if (step >= 1 && step <= 5) {
+    const totalSteps = answers.type === "student_residence" ? 5 : 4;
+    const pp = (step / totalSteps) * 100;
+    const typeOpts = [{value:"student_residence",label:"Student Residence",desc:"Purpose-built student housing with shuttle service"},{value:"hotel",label:"Hotel / Hotel Apartment",desc:"Short or long-term stays, serviced apartments, many near campus"},{value:"any",label:"Show me everything",desc:"Compare all types of accommodation"}];
+    const durOpts = [{value:"short",label:"Short-term (under 1 month)",desc:"Nightly rates, ideal for your first weeks in Dubai"},{value:"medium",label:"1 - 3 months",desc:"Settling in while you explore longer options"},{value:"long_3_6",label:"3 - 6 months",desc:"One semester or half the academic year"},{value:"long_6_12",label:"6 - 12 months",desc:"Full academic year or longer"}];
+    const budOpts = [{value:"under_3000",label:"Under AED 3,000 / month",desc:"Most affordable, shared rooms available"},{value:"3000_5000",label:"AED 3,000 - 5,000 / month",desc:"Private rooms and basic studios"},{value:"5000_8000",label:"AED 5,000 - 8,000 / month",desc:"Mid-range studios and apartments"},{value:"8000_15000",label:"AED 8,000 - 15,000 / month",desc:"Premium hotels and apartments"},{value:"15000_plus",label:"AED 15,000+ / month",desc:"Luxury beachfront and large apartments"}];
+    const proxOpts = [{value:"walking",label:"Walking distance only",desc:"Under 20 min walk to campus"},{value:"commute",label:"Short commute",desc:"10 - 30 min by car or shuttle"},{value:"any",label:"Any distance",desc:"Show everything, near and far"}];
+    const privOpts = [{value:"private",label:"Private room / Studio",desc:"My own space, higher price point"},{value:"shared",label:"Shared room is fine",desc:"Happy to share to save money"},{value:"any",label:"Show me both",desc:"Compare all options"}];
+    return (
+      <div style={s.container}>
+        <div style={s.header}><span style={{fontWeight:700,fontSize:"15px"}}>Dubai Home Finder</span><button onClick={reset} style={{background:"rgba(255,255,255,0.12)",border:"none",color:"white",borderRadius:"6px",padding:"6px 14px",fontSize:"12px",cursor:"pointer",fontFamily:"inherit"}}>Start Over</button></div>
+        <div style={{height:"3px",background:C.lightGray}}><div style={{height:"3px",background:C.blue,width:`${pp}%`,transition:"width 0.3s ease"}}/></div>
+        <div style={s.content}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"20px"}}><div style={{fontSize:"12px",color:C.gray,fontWeight:500}}>Step {step} of {totalSteps}</div>{step>1&&<button onClick={goBack} style={{background:"none",border:"none",color:C.blue,fontSize:"13px",fontWeight:600,cursor:"pointer",fontFamily:"inherit",padding:"4px 0"}}><span style={{marginRight:"4px"}}>&larr;</span> Back</button>}</div>
+          {step===1&&(<><div style={s.q}>What type of accommodation are you looking for?</div><div style={s.sub}>This helps us narrow down the right options.</div>{typeOpts.map(o=>renderOption(o,v=>selectAnswer("type",v)))}</>)}
+          {step===2&&(<><div style={s.q}>How long do you need accommodation for?</div><div style={s.sub}>This affects which options and rates are available.</div>{durOpts.map(o=>renderOption(o,v=>selectAnswer("duration",v)))}</>)}
+          {step===3&&(<><div style={s.q}>What's your monthly budget? (AED)</div><div style={s.sub}>We'll show options with rooms that fit your range.</div>{budOpts.map(o=>renderOption(o,v=>selectAnswer("budget",v)))}</>)}
+          {step===4&&(<><div style={s.q}>How important is being close to campus?</div><div style={s.sub}>Hult's campus is in Dubai Internet City.</div>{proxOpts.map(o=>renderOption(o,v=>selectAnswer("proximity",v)))}</>)}
+          {step===5&&answers.type==="student_residence"&&(<><div style={s.q}>Private room or okay sharing?</div><div style={s.sub}>Shared rooms are significantly cheaper.</div>{privOpts.map(o=>renderOption(o,v=>{const fa={...answers,privacy:v};setAnswers(fa);runFilter(fa);}))}</>)}
+        </div>
+      </div>
+    );
+  }
+
+  if (step===6) return (
+    <div style={s.container}>
+      <div style={s.header}><span style={{fontWeight:700,fontSize:"15px"}}>Dubai Home Finder</span><button onClick={reset} style={{background:"rgba(255,255,255,0.12)",border:"none",color:"white",borderRadius:"6px",padding:"6px 14px",fontSize:"12px",cursor:"pointer",fontFamily:"inherit"}}>Start Over</button></div>
+      <div style={s.content}>
+        <div style={s.q}>{results.length>0?`We found ${results.length} option${results.length!==1?"s":""} for you`:"No exact matches"}</div>
+        <div style={s.sub}>{results.length>0?"Use your Hult student email for partner rates.":"Try adjusting your filters below."}</div>
+        {relaxedMessage&&<div style={{background:"#EFF6FF",border:"1px solid #BFDBFE",borderRadius:"8px",padding:"12px 16px",marginBottom:"20px",fontSize:"13px",color:"#1E40AF",lineHeight:1.5}}>{relaxedMessage}</div>}
+        <div style={{background:"white",borderRadius:"10px",padding:"12px 16px",marginBottom:"24px",display:"flex",flexWrap:"wrap",gap:"8px",border:"1px solid "+C.lightGray}}>
+          {answers.type&&<span style={{background:C.tagBg,color:C.navy,padding:"4px 12px",borderRadius:"20px",fontSize:"12px",fontWeight:600}}>{answers.type==="any"?"All Types":typeLabels[answers.type]}</span>}
+          {answers.duration&&<span style={{background:C.tagBg,color:C.navy,padding:"4px 12px",borderRadius:"20px",fontSize:"12px",fontWeight:600}}>{answers.duration==="short"?"< 1 month":answers.duration==="medium"?"1-3 months":answers.duration==="long_3_6"?"3-6 months":"6-12 months"}</span>}
+          {answers.budget&&<span style={{background:C.tagBg,color:C.navy,padding:"4px 12px",borderRadius:"20px",fontSize:"12px",fontWeight:600}}>{answers.budget==="under_3000"?"< AED 3K":answers.budget==="3000_5000"?"AED 3-5K":answers.budget==="5000_8000"?"AED 5-8K":answers.budget==="8000_15000"?"AED 8-15K":"AED 15K+"}</span>}
+          {answers.proximity&&<span style={{background:C.tagBg,color:C.navy,padding:"4px 12px",borderRadius:"20px",fontSize:"12px",fontWeight:600}}>{answers.proximity==="walking"?"Walking distance":answers.proximity==="commute"?"Short commute":"Any distance"}</span>}
+        </div>
+        {results.length>1&&(<div style={{display:"flex",gap:"8px",marginBottom:"20px",alignItems:"center"}}><span style={{fontSize:"12px",color:C.gray,fontWeight:500}}>Sort by:</span>{[["price","Price"],["distance","Distance"]].map(([val,label])=>(<button key={val} onClick={()=>setSortBy(val)} style={{background:sortBy===val?C.navy:"white",color:sortBy===val?"white":C.navy,border:"1px solid "+(sortBy===val?C.navy:C.lightGray),borderRadius:"6px",padding:"6px 14px",fontSize:"12px",fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>{label}</button>))}</div>)}
+
+        {[...results].sort((a,b)=>{const cA=Math.min(...a.rooms.map(r=>monthlyEstimate(r)));const cB=Math.min(...b.rooms.map(r=>monthlyEstimate(r)));if(sortBy==="distance")return a.distanceMins-b.distanceMins||cA-cB;return cA-cB||a.distanceMins-b.distanceMins;}).map(acc=>(
+          <div key={acc.id} style={{background:"white",borderRadius:"12px",overflow:"hidden",marginBottom:"20px",border:"1px solid "+C.lightGray}}>
+            <DualImage imgs={acc.imgs} alt={acc.name}/>
+            <div style={{padding:"18px 20px"}}>
+              <span style={{background:typeColors[acc.type]||C.navy,color:"white",fontSize:"10px",fontWeight:700,padding:"3px 10px",borderRadius:"4px",textTransform:"uppercase",letterSpacing:"0.5px"}}>{typeLabels[acc.type]||acc.type}</span>
+              <h3 style={{fontSize:"20px",fontWeight:700,margin:"10px 0 4px",color:C.navy}}>{acc.name}</h3>
+              <div style={{fontSize:"13px",color:C.gray,marginBottom:"10px"}}>{acc.location} &middot; {acc.distance}</div>
+              {(()=>{const estimates=acc.rooms.map(r=>monthlyEstimate(r));const low=Math.min(...estimates);const high=Math.max(...estimates);return(<div style={{display:"flex",alignItems:"baseline",gap:"8px",marginBottom:"14px",padding:"10px 14px",background:"#F0F7FF",borderRadius:"8px",flexWrap:"wrap"}}><span style={{fontSize:"11px",fontWeight:600,color:C.gray,textTransform:"uppercase",letterSpacing:"0.3px"}}>Avg. monthly rate</span><span style={{fontSize:"18px",fontWeight:800,color:C.navy}}>{acc.rateType==="nightly"?"~":""}AED {low===high?low.toLocaleString():`${low.toLocaleString()} - ${high.toLocaleString()}`}</span>{acc.rateNote&&<span style={{fontSize:"11px",color:C.teal,fontWeight:500,flexBasis:"100%"}}>{acc.rateNote}</span>}</div>);})()}
+              <div style={{background:"#F8FAFC",borderRadius:"8px",padding:"12px 16px",marginBottom:"14px"}}>
+                <div style={{fontSize:"11px",fontWeight:700,color:C.gray,marginBottom:"10px",textTransform:"uppercase",letterSpacing:"0.5px"}}>Room Options</div>
+                {acc.rooms.map((room,i)=>{const isNightly=room.perNight;const isTotal=!!room.total;return(
+                  <div key={i} style={{padding:"8px 0",borderBottom:i<acc.rooms.length-1?"1px solid "+C.lightGray:"none"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{fontSize:"13px",color:C.navy}}>{room.type}{room.privacy==="shared"&&<span style={{color:C.gray,fontSize:"11px"}}> (shared)</span>}</span><span style={{fontSize:"13px",fontWeight:700,color:C.navy,whiteSpace:"nowrap",marginLeft:"12px"}}>{isTotal?`AED ${(room.monthly||0).toLocaleString()}/mo`:room.fromPrice?`From AED ${room.min.toLocaleString()}/mo`:isNightly?`AED ${room.min.toLocaleString()}${room.min!==room.max?` - ${room.max.toLocaleString()}`:""}/night`:`AED ${room.min.toLocaleString()}${room.min!==room.max?` - ${room.max.toLocaleString()}`:""}/mo`}</span></div>
+                    {isNightly&&<div style={{fontSize:"11px",color:C.gray,textAlign:"right",marginTop:"2px"}}>~AED {(room.min*30).toLocaleString()} - {(room.max*30).toLocaleString()}/mo</div>}
+                    {isTotal&&<div style={{fontSize:"11px",color:C.gray,textAlign:"right",marginTop:"2px"}}>AED {room.total.toLocaleString()} total for 8 months</div>}
+                    {room.rateTag&&<div style={{fontSize:"10px",color:C.teal,textAlign:"right",marginTop:"2px",fontWeight:500}}>{room.rateTag}</div>}
+                  </div>
+                );})}
+              </div>
+              {(()=>{const isExp=expandedAmenities===acc.id;const shown=isExp?acc.amenities:acc.amenities.slice(0,4);const hasMore=acc.amenities.length>4;return(<div style={{display:"flex",flexWrap:"wrap",gap:"6px",marginBottom:"14px"}}>{shown.map((a,i)=><span key={i} style={{background:C.greenBg,color:C.green,fontSize:"11px",fontWeight:500,padding:"4px 10px",borderRadius:"4px"}}>{a}</span>)}{hasMore&&<span onClick={()=>setExpandedAmenities(isExp?null:acc.id)} style={{background:"#F1F5F9",color:C.blue,fontSize:"11px",fontWeight:600,padding:"4px 10px",borderRadius:"4px",cursor:"pointer"}}>{isExp?"Show less":`+${acc.amenities.length-4} more`}</span>}</div>);})()}
+              {acc.notes&&<div style={{fontSize:"12px",color:C.amber,lineHeight:1.5,marginBottom:"14px",padding:"10px 14px",background:C.amberBg,borderRadius:"6px",borderLeft:"3px solid "+C.amberBorder}}>{acc.notes}</div>}
+              {acc.deposit&&acc.deposit!=="N/A"&&<div style={{fontSize:"12px",color:C.gray,marginBottom:"14px"}}>Security deposit: {acc.deposit}</div>}
+              <button onClick={()=>setExpandedContact(expandedContact===acc.id?null:acc.id)} style={{width:"100%",background:expandedContact===acc.id?C.navy:"white",color:expandedContact===acc.id?"white":C.navy,border:"2px solid "+C.navy,borderRadius:"8px",padding:"12px",fontSize:"14px",fontWeight:700,cursor:"pointer",fontFamily:"inherit",transition:"all 0.15s ease"}}>{expandedContact===acc.id?"Hide Contact Info":"Contact Them"}</button>
+              {expandedContact===acc.id&&(
+                <div style={{marginTop:"12px",padding:"14px 16px",background:"#F8FAFC",borderRadius:"8px",fontSize:"14px"}}>
+                  {acc.contact.person&&<div style={{marginBottom:"12px"}}><span style={{color:C.gray,fontSize:"12px"}}>Contact: </span><span style={{fontWeight:600}}>{acc.contact.person}</span></div>}
+                  <div style={{display:"flex",gap:"10px",flexWrap:"wrap",marginBottom:"12px"}}>
+                    {acc.contact.email&&(<a href={`mailto:${acc.contact.email}`} style={{display:"flex",alignItems:"center",gap:"8px",background:"white",border:"1px solid "+C.lightGray,borderRadius:"8px",padding:"10px 14px",textDecoration:"none",color:C.navy,flex:"1",minWidth:"140px"}}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2563EB" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 7L2 7"/></svg><div style={{overflow:"hidden"}}><div style={{fontSize:"10px",color:C.gray,fontWeight:600}}>EMAIL</div><div style={{fontSize:"12px",fontWeight:600,color:C.blue,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{acc.contact.email}</div></div></a>)}
+                    {acc.contact.phone&&(<a href={`tel:${acc.contact.phone}`} style={{display:"flex",alignItems:"center",gap:"8px",background:"white",border:"1px solid "+C.lightGray,borderRadius:"8px",padding:"10px 14px",textDecoration:"none",color:C.navy,flex:"1",minWidth:"140px"}}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2563EB" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg><div><div style={{fontSize:"10px",color:C.gray,fontWeight:600}}>CALL</div><div style={{fontSize:"12px",fontWeight:600,color:C.blue}}>{acc.contact.phone}</div></div></a>)}
+                    {acc.contact.phone&&(<a href={`https://wa.me/${acc.contact.phone.replace(/[\s\-\+]/g,'')}`} target="_blank" style={{display:"flex",alignItems:"center",gap:"8px",background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:"8px",padding:"10px 14px",textDecoration:"none",color:C.navy,flex:"1",minWidth:"140px"}}><svg width="18" height="18" viewBox="0 0 24 24" fill="#25D366"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg><div><div style={{fontSize:"10px",color:"#166534",fontWeight:600}}>WHATSAPP</div><div style={{fontSize:"12px",fontWeight:600,color:"#166534"}}>Send message</div></div></a>)}
+                  </div>
+                  {acc.contact.website&&<div style={{fontSize:"12px",color:C.gray,marginBottom:"8px"}}>Website: <span style={{fontWeight:600,color:C.navy}}>{acc.contact.website}</span></div>}
+                  <div style={{fontSize:"12px",color:C.teal,fontWeight:600,lineHeight:1.5}}>Email from your @student.hult.edu address, or mention you're a Hult student if calling, to get partner rates.</div>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+
+        {results.length>0&&(
+          <div style={{background:"white",borderRadius:"12px",padding:"20px",border:"2px dashed "+C.lightGray,textAlign:"center",marginTop:"8px"}}>
+            <div style={{fontSize:"15px",fontWeight:700,color:C.navy,marginBottom:"6px"}}>Looking for private apartments?</div>
+            <div style={{fontSize:"13px",color:C.gray,marginBottom:"14px",lineHeight:1.5}}>Hult's real estate agent partner can help you find furnished apartments across Dubai neighborhoods.</div>
+            <div style={{fontSize:"15px",color:C.navy,fontWeight:700,marginBottom:"12px"}}>Prakash Ahuja</div>
+            <div style={{display:"flex",gap:"8px",justifyContent:"center",flexWrap:"wrap"}}>
+              <a href="mailto:ahujadxb@gmail.com" style={{display:"flex",alignItems:"center",gap:"6px",background:"white",border:"1px solid "+C.lightGray,borderRadius:"8px",padding:"8px 14px",textDecoration:"none"}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2563EB" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 7L2 7"/></svg><span style={{fontSize:"12px",fontWeight:600,color:C.blue}}>Email</span></a>
+              <a href="tel:+971507222436" style={{display:"flex",alignItems:"center",gap:"6px",background:"white",border:"1px solid "+C.lightGray,borderRadius:"8px",padding:"8px 14px",textDecoration:"none"}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2563EB" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg><span style={{fontSize:"12px",fontWeight:600,color:C.blue}}>Call</span></a>
+              <a href="https://wa.me/971507222436" target="_blank" style={{display:"flex",alignItems:"center",gap:"6px",background:"#F0FDF4",border:"1px solid #BBF7D0",borderRadius:"8px",padding:"8px 14px",textDecoration:"none"}}><svg width="16" height="16" viewBox="0 0 24 24" fill="#25D366"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg><span style={{fontSize:"12px",fontWeight:600,color:"#166534"}}>WhatsApp</span></a>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+  return null;
+}
+
+ReactDOM.render(<App />, document.getElementById("root"));
+</script>
+</body>
+</html>
